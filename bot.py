@@ -906,19 +906,25 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await update.message.reply_text(SECOND_TEXT, reply_markup=InlineKeyboardMarkup(second_keyboard))
 
 
+async def send_playlist_webapp_prompt(message) -> None:
+    if not message:
+        return
+    webapp_keyboard = [[InlineKeyboardButton("🅿🅻🅴🆈🅻🅸🆂🆃 ni ochish", web_app=WebAppInfo(url=WEBAPP_URL))]]
+    await message.reply_text(
+        f"{START_BUTTON_TEXT}\n\n"
+        f"🎞️ Bizda hozir {get_video_count()} kino bor.\n\n"
+        "🅿🅻🅴🆈🅻🅸🆂🆃 ni Telegram ichida ochish uchun tugmani bosing.",
+        reply_markup=InlineKeyboardMarkup(webapp_keyboard),
+    )
+
+
 async def start_button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if not query or not query.message:
         return
     await sync_telegram_user_profile(update, context)
     await query.answer()
-    webapp_keyboard = [[InlineKeyboardButton("🅿🅻🅴🆈🅻🅸🆂🆃 ni ochish", web_app=WebAppInfo(url=WEBAPP_URL))]]
-    await query.message.reply_text(
-        f"{START_BUTTON_TEXT}\n\n"
-        f"🎞️ Bizda hozir {get_video_count()} kino bor.\n\n"
-        "🅿🅻🅴🆈🅻🅸🆂🆃 ni Telegram ichida ochish uchun tugmani bosing.",
-        reply_markup=InlineKeyboardMarkup(webapp_keyboard),
-    )
+    await send_playlist_webapp_prompt(query.message)
 
 
 def is_admin_user(update: Update) -> bool:
@@ -1117,6 +1123,13 @@ async def admin_flow_router(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return
 
 
+async def user_message_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message or is_admin_user(update):
+        return
+    await sync_telegram_user_profile(update, context)
+    await send_playlist_webapp_prompt(update.message)
+
+
 async def live_command_entry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if not update.message:
         return ConversationHandler.END
@@ -1217,6 +1230,9 @@ def main() -> None:
         )
     )
     application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(
+        MessageHandler(filters.TEXT & ~filters.COMMAND, user_message_router)
+    )
     application.add_handler(CallbackQueryHandler(start_button_callback, pattern="^start_bot$"))
     application.add_handler(CallbackQueryHandler(admin_menu_callback, pattern=r"^admin_menu:"))
     application.add_handler(CallbackQueryHandler(delete_ad_callback, pattern=r"^delete_ad:\d+$"))

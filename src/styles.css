@@ -2989,6 +2989,7 @@ body[data-category="pleylist"] .library-item__id {
 }
 
 .profile-badge.has-photo {
+  position: relative;
   color: #09111d;
   background-color: #182230;
   box-shadow:
@@ -2997,6 +2998,8 @@ body[data-category="pleylist"] .library-item__id {
 }
 
 .profile-avatar-fallback {
+  position: absolute;
+  inset: 0;
   display: grid;
   place-items: center;
   width: 100%;
@@ -3007,6 +3010,8 @@ body[data-category="pleylist"] .library-item__id {
 }
 
 .profile-avatar-image {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   display: block;
