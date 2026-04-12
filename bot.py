@@ -1225,7 +1225,11 @@ def main() -> None:
     application.add_handler(MessageHandler(filters.Regex(r"^//live//$"), live_off_command))
     application.add_handler(
         MessageHandler(
-            (filters.TEXT | filters.VIDEO | filters.Document.MimeType("video/mp4")) & ~filters.COMMAND,
+            (
+                filters.User(user_id=list(ADMIN_USER_IDS))
+                & (filters.TEXT | filters.VIDEO | filters.Document.MimeType("video/mp4"))
+                & ~filters.COMMAND
+            ),
             admin_flow_router,
         )
     )
