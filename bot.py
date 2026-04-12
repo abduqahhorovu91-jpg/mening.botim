@@ -11,7 +11,7 @@ from urllib.parse import parse_qs, quote_plus, urlparse
 from urllib.request import Request, urlopen
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo
-from telegram.error import BadRequest, NetworkError
+from telegram.error import BadRequest, Conflict, NetworkError
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -533,13 +533,14 @@ def build_external_file_response(handler: BaseHTTPRequestHandler, file_url: str)
 
 
 class ApiHandler(BaseHTTPRequestHandler):
-    def _send_bytes(self, status_code: int, payload: bytes, content_type: str) -> None:
+    def _send_bytes(self, status_code: int, payload: bytes, content_type: str, head_only: bool = False) -> None:
         self.send_response(status_code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(payload)))
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
-        self.wfile.write(payload)
+        if not head_only:
+            self.wfile.write(payload)
 
     def _send_json(self, status_code: int, payload: dict) -> None:
         encoded = json.dumps(payload).encode("utf-8")
@@ -552,7 +553,7 @@ class ApiHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(encoded)
 
-    def _serve_frontend(self, request_path: str) -> bool:
+    def _serve_frontend(self, request_path: str, head_only: bool = False) -> bool:
         if not FRONTEND_INDEX.exists():
             return False
 
@@ -567,19 +568,49 @@ class ApiHandler(BaseHTTPRequestHandler):
 
         if target.is_file():
             content_type = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
-            self._send_bytes(200, target.read_bytes(), content_type)
+            self._send_bytes(200, target.read_bytes(), content_type, head_only=head_only)
             return True
 
-        self._send_bytes(200, FRONTEND_INDEX.read_bytes(), "text/html; charset=utf-8")
+        self._send_bytes(200, FRONTEND_INDEX.read_bytes(), "text/html; charset=utf-8", head_only=head_only)
         return True
+
+    def _send_head_only(self, status_code: int, content_type: str = "text/plain; charset=utf-8") -> None:
+        self.send_response(status_code)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", "0")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS, HEAD")
+        self.end_headers()
 
     def do_OPTIONS(self) -> None:
         self._send_json(200, {"ok": True})
+
+    def do_HEAD(self) -> None:
+        parsed = urlparse(self.path)
+        path = parsed.path
+
+        if path == "/healthz":
+            self._send_head_only(200)
+            return
+
+        if path.startswith("/api/"):
+            self._send_head_only(200, "application/json; charset=utf-8")
+            return
+
+        if self._serve_frontend(path, head_only=True):
+            return
+
+        self._send_head_only(404)
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         path = parsed.path
         query = parse_qs(parsed.query)
+
+        if path == "/healthz":
+            self._send_json(200, {"ok": True, "status": "healthy"})
+            return
 
         if not path.startswith("/api/") and self._serve_frontend(path):
             return
@@ -1185,6 +1216,11 @@ def main() -> None:
     print("🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥")
     try:
         application.run_polling()
+    except Conflict as exc:
+        print(f"Telegram polling conflict: {exc}")
+        print("Bot polling to'xtatildi, lekin API va frontend ishlashda davom etadi.")
+        while True:
+            asyncio.run(asyncio.sleep(3600))
     except NetworkError:
         print("Telegram bilan ulanishda xatolik. API server ishlashda davom etadi.")
         while True:
