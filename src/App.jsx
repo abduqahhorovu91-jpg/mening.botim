@@ -31,6 +31,26 @@ const CATEGORY_TOAST_LABELS = {
   PROFILE: "profil",
 };
 
+function getTelegramUser(webApp = tg) {
+  const directUser = webApp?.initDataUnsafe?.user;
+  if (directUser && (directUser.id || directUser.username || directUser.first_name)) {
+    return directUser;
+  }
+
+  const rawInitData = String(webApp?.initData || "").trim();
+  if (!rawInitData) return null;
+
+  try {
+    const params = new URLSearchParams(rawInitData);
+    const rawUser = params.get("user");
+    if (!rawUser) return null;
+    const parsedUser = JSON.parse(rawUser);
+    return parsedUser && typeof parsedUser === "object" ? parsedUser : null;
+  } catch {
+    return null;
+  }
+}
+
 function formatDuration(seconds = 0) {
   const totalSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
   const hours = Math.floor(totalSeconds / 3600);
@@ -229,8 +249,9 @@ function getInitials(value) {
   return (joined || normalized.slice(0, 1)).toUpperCase();
 }
 
-function getTelegramUserId() {
-  const rawUserId = tg?.initDataUnsafe?.user?.id;
+function getTelegramUserId(webApp = tg) {
+  const telegramUser = getTelegramUser(webApp);
+  const rawUserId = telegramUser?.id;
   if (typeof rawUserId === "number" && Number.isFinite(rawUserId) && rawUserId > 0) {
     return String(rawUserId);
   }
@@ -374,12 +395,32 @@ function ScrollingText({ text, className }) {
 }
 
 function Avatar({ className, photoUrl, fallbackText, alt = "Profil rasmi" }) {
-  return photoUrl ? (
-    <span className={`${className} has-photo`}>
-      <img className="profile-avatar-image" src={photoUrl} alt={alt} />
+  const normalizedPhotoUrl = String(photoUrl || "").trim();
+  const [isLoaded, setIsLoaded] = useState(false);
+
+  useEffect(() => {
+    setIsLoaded(false);
+  }, [normalizedPhotoUrl]);
+
+  if (!normalizedPhotoUrl) {
+    return <span className={className}>{fallbackText}</span>;
+  }
+
+  return (
+    <span className={`${className} has-photo ${isLoaded ? "is-loaded" : "is-loading"}`}>
+      <span className="profile-avatar-fallback" aria-hidden={isLoaded ? "true" : "false"}>
+        {fallbackText}
+      </span>
+      <img
+        className="profile-avatar-image"
+        src={normalizedPhotoUrl}
+        alt={alt}
+        loading="eager"
+        decoding="async"
+        onLoad={() => setIsLoaded(true)}
+        onError={() => setIsLoaded(false)}
+      />
     </span>
-  ) : (
-    <span className={className}>{fallbackText}</span>
   );
 }
 
@@ -432,6 +473,7 @@ async function loadCatalogItems() {
 
 export default function App() {
   const [telegramUserId, setTelegramUserId] = useState(() => getTelegramUserId());
+  const [telegramUser, setTelegramUser] = useState(() => getTelegramUser());
   const [playIntroAnimations, setPlayIntroAnimations] = useState(true);
   const [theme, setTheme] = useState("default");
   const [themePanelOpen, setThemePanelOpen] = useState(false);
@@ -493,17 +535,17 @@ export default function App() {
   selectedTargetUserIdRef.current = selectedTargetUserId;
 
   const photoUrl = String(
-    telegramProfilePhotoUrl || tg?.initDataUnsafe?.user?.photo_url || "",
+    telegramProfilePhotoUrl || telegramUser?.photo_url || "",
   ).trim();
   const profileBadgeText = (() => {
-    const firstName = String(tg?.initDataUnsafe?.user?.first_name || "").trim();
+    const firstName = String(telegramUser?.first_name || "").trim();
     if (selectedTargetUserId) return selectedTargetUserId.slice(-2);
     if (firstName) return firstName.slice(0, 1).toUpperCase();
     return "U";
   })();
   const telegramFullName = [
-    String(tg?.initDataUnsafe?.user?.first_name || "").trim(),
-    String(tg?.initDataUnsafe?.user?.last_name || "").trim(),
+    String(telegramUser?.first_name || "").trim(),
+    String(telegramUser?.last_name || "").trim(),
   ]
     .filter(Boolean)
     .join(" ")
@@ -572,8 +614,13 @@ export default function App() {
 
     let attempts = 0;
     const syncTelegramUser = () => {
+      const nextUser = getTelegramUser();
       const nextUserId = getTelegramUserId();
       if (!nextUserId) return false;
+      setTelegramUser((current) => {
+        const currentId = String(current?.id || "").trim();
+        return currentId === nextUserId ? current : nextUser;
+      });
       setTelegramUserId((current) => (current === nextUserId ? current : nextUserId));
       return true;
     };
@@ -591,6 +638,24 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!telegramUserId) return;
+
+    fetch(`${API_BASE_URL}/api/users`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        user_id: telegramUserId,
+        username: String(telegramUser?.username || "").trim(),
+        full_name: [
+          String(telegramUser?.first_name || "").trim(),
+          String(telegramUser?.last_name || "").trim(),
+        ].filter(Boolean).join(" "),
+        photo_url: String(telegramUser?.photo_url || "").trim(),
+      }),
+    }).catch(() => {});
+  }, [telegramUserId, telegramUser]);
+
+  useEffect(() => {
     const savedTheme = window.localStorage.getItem(themeStorageKey) || "default";
     setTheme(THEMES.includes(savedTheme) ? savedTheme : "default");
 
@@ -599,12 +664,16 @@ export default function App() {
       setProfileInputValue(telegramUserId);
       setIsAutoDetectedUserId(true);
       window.localStorage.removeItem(TARGET_USER_STORAGE_KEY);
-    } else {
+    } else if (!tg) {
       const savedTarget = window.localStorage.getItem(targetUserStorageKey) || "";
       const normalizedTarget = /^\d+$/.test(savedTarget) ? savedTarget : "";
       setSelectedTargetUserId(normalizedTarget);
       setProfileInputValue(normalizedTarget);
       setIsAutoDetectedUserId(false);
+    } else {
+      setSelectedTargetUserId("");
+      setProfileInputValue("");
+      setIsAutoDetectedUserId(true);
     }
   }, [telegramUserId, themeStorageKey, targetUserStorageKey]);
 
@@ -1262,6 +1331,7 @@ export default function App() {
   }
 
   function openProfileModal() {
+    if (tg) return;
     if (isAutoDetectedUserId) return;
     setProfileInputValue(selectedTargetUserId);
     setProfileModalOpen(true);

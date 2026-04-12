@@ -2989,11 +2989,21 @@ body[data-category="pleylist"] .library-item__id {
 }
 
 .profile-badge.has-photo {
-  color: transparent;
+  color: #09111d;
   background-color: #182230;
   box-shadow:
     0 0 0 2px rgba(255, 255, 255, 0.08),
     0 8px 18px rgba(0, 0, 0, 0.18);
+}
+
+.profile-avatar-fallback {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  background: inherit;
+  color: inherit;
 }
 
 .profile-avatar-image {
@@ -3003,6 +3013,16 @@ body[data-category="pleylist"] .library-item__id {
   border-radius: inherit;
   object-fit: cover;
   object-position: center;
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+
+.has-photo.is-loaded .profile-avatar-fallback {
+  opacity: 0;
+}
+
+.has-photo.is-loaded .profile-avatar-image {
+  opacity: 1;
 }
 
 body.search-open .promo-ticker,
