@@ -1,5 +1,7 @@
 import asyncio
 import json
+import mimetypes
+import os
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -23,10 +25,11 @@ from telegram.ext import (
 TOKEN = "8204726213:AAGnNnPI2VqcN6llRzxXZl6cU8Rx7EJFRwc"
 BOT_USERNAME = "Hidop_bot"
 API_HOST = "0.0.0.0"
-API_PORT = 8000
-WEBAPP_URL = "http://192.168.1.101:5175/"
+API_PORT = int(os.getenv("PORT", "8000"))
 
 BASE_DIR = Path(__file__).resolve().parent
+FRONTEND_DIR = BASE_DIR / "dist"
+FRONTEND_INDEX = FRONTEND_DIR / "index.html"
 VIDEOS_FILE = BASE_DIR / "videos.json"
 USERS_FILE = BASE_DIR / "user.json"
 SAVED_VIDEOS_FILE = BASE_DIR / "saved_videos.json"
@@ -51,7 +54,6 @@ START_BUTTON_TEXT = (
 )
 BUTTON_URL = f"https://t.me/share/url?url=https://t.me/{BOT_USERNAME}"
 FORCED_MODAL_YOUTUBE_URL = "https://youtu.be/yAAOsFoViKQ?si=OmBx0YuR5ZKuDGUn"
-PLAYLIST_REPLY_TEXT = "🅿🅻🅴🆈🅻🅸🆂🆃 dan topasiz ✅"
 ADMIN_USER_IDS = {8239140931}
 AD_VIDEO_URL, AD_LINK_URL, LIVE_URL = range(3)
 
@@ -530,6 +532,14 @@ def build_external_file_response(handler: BaseHTTPRequestHandler, file_url: str)
 
 
 class ApiHandler(BaseHTTPRequestHandler):
+    def _send_bytes(self, status_code: int, payload: bytes, content_type: str) -> None:
+        self.send_response(status_code)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(payload)
+
     def _send_json(self, status_code: int, payload: dict) -> None:
         encoded = json.dumps(payload).encode("utf-8")
         self.send_response(status_code)
@@ -541,6 +551,27 @@ class ApiHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(encoded)
 
+    def _serve_frontend(self, request_path: str) -> bool:
+        if not FRONTEND_INDEX.exists():
+            return False
+
+        normalized = request_path or "/"
+        relative_path = normalized.lstrip("/") or "index.html"
+        target = (FRONTEND_DIR / relative_path).resolve()
+
+        try:
+            target.relative_to(FRONTEND_DIR.resolve())
+        except ValueError:
+            return False
+
+        if target.is_file():
+            content_type = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
+            self._send_bytes(200, target.read_bytes(), content_type)
+            return True
+
+        self._send_bytes(200, FRONTEND_INDEX.read_bytes(), "text/html; charset=utf-8")
+        return True
+
     def do_OPTIONS(self) -> None:
         self._send_json(200, {"ok": True})
 
@@ -548,6 +579,9 @@ class ApiHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
         query = parse_qs(parsed.query)
+
+        if not path.startswith("/api/") and self._serve_frontend(path):
+            return
 
         if path == "/api/catalog":
             items = [serialize_video_item(item) for item in load_videos().get("items", []) if isinstance(item, dict)]
@@ -840,18 +874,6 @@ async def start_button_callback(update: Update, context: ContextTypes.DEFAULT_TY
     await query.answer()
     await query.message.reply_text(START_BUTTON_TEXT)
     await query.message.reply_text(f"bizda hozir {get_video_count()} kino bor 🎞️")
-    playlist_keyboard = [[InlineKeyboardButton("🅿🅻🅴🆈🅻🅸🆂🆃 ni ochish", url=WEBAPP_URL)]]
-    await query.message.reply_text(
-        "Playlistni ochish uchun pastdagi tugmani bosing.",
-        reply_markup=InlineKeyboardMarkup(playlist_keyboard),
-    )
-
-
-async def playlist_reply_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.message or not update.message.text:
-        return
-    await sync_telegram_user_profile(update, context)
-    await update.message.reply_text(PLAYLIST_REPLY_TEXT)
 
 
 def is_admin_user(update: Update) -> bool:
@@ -1154,7 +1176,6 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(admin_menu_callback, pattern=r"^admin_menu:"))
     application.add_handler(CallbackQueryHandler(delete_ad_callback, pattern=r"^delete_ad:\d+$"))
     application.add_handler(CallbackQueryHandler(live_stop_callback, pattern=r"^live_stop:confirm$"))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, playlist_reply_message))
     print("🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥")
     try:
         application.run_polling()
