@@ -911,9 +911,7 @@ async def send_playlist_webapp_prompt(message) -> None:
         return
     webapp_keyboard = [[InlineKeyboardButton("🅿🅻🅴🆈🅻🅸🆂🆃 ni ochish", web_app=WebAppInfo(url=WEBAPP_URL))]]
     await message.reply_text(
-        f"{START_BUTTON_TEXT}\n\n"
-        f"🎞️ Bizda hozir {get_video_count()} kino bor.\n\n"
-        "🅿🅻🅴🆈🅻🅸🆂🆃 ni Telegram ichida ochish uchun tugmani bosing.",
+        "🅿🅻🅴🆈🅻🅸🆂🆃 ni Telegram ichida ochish uchun tugmani bosing⬇️",
         reply_markup=InlineKeyboardMarkup(webapp_keyboard),
     )
 
