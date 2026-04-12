@@ -817,24 +817,7 @@ class ApiHandler(BaseHTTPRequestHandler):
             if not raw_message:
                 self._send_json(400, {"ok": False, "message": "message kerak"})
                 return
-            target_user_id = int(payload.get("target_user_id") or next(iter(ADMIN_USER_IDS)))
-            request = Request(
-                f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-                data=json.dumps({
-                    "chat_id": target_user_id,
-                    "text": raw_message,
-                }).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            try:
-                with urlopen(request, timeout=20) as response:
-                    result = json.loads(response.read().decode("utf-8"))
-                self._send_json(200, {"ok": bool(result.get("ok"))})
-            except HTTPError as error:
-                self._send_json(400, {"ok": False, "message": f"HTTP {error.code}"})
-            except URLError:
-                self._send_json(502, {"ok": False, "message": "Telegram API bilan ulanishda xatolik"})
+            self._send_json(200, {"ok": True, "echo": raw_message})
             return
         if path == "/api/save-video":
             owner_id = str(payload.get("owner_id", "") or payload.get("user_id", "")).strip()
