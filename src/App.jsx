@@ -12,7 +12,7 @@ const AD_CLOSE_DELAY_MS = 8000;
 const AD_PREVIEW_REVEAL_DELAY_MS = 3400;
 const TARGET_USER_STORAGE_KEY = "hidop_target_user_id";
 const THEME_STORAGE_KEY = "hidop_theme";
-const PROFILE_CTA_URL = "https://mee-87w1.onrender.com";
+const PROFILE_CTA_URL = "https://mee-j52n.onrender.com";
 const THEME_OPTIONS = [
   { id: "default", label: "Tungi" },
   { id: "sunset", label: "Sunset" },
