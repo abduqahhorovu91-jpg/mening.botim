@@ -10,7 +10,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, quote_plus, urlparse
 from urllib.request import Request, urlopen
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo
 from telegram.error import BadRequest, NetworkError
 from telegram.ext import (
     Application,
@@ -26,6 +26,7 @@ TOKEN = "8204726213:AAGnNnPI2VqcN6llRzxXZl6cU8Rx7EJFRwc"
 BOT_USERNAME = "Hidop_bot"
 API_HOST = "0.0.0.0"
 API_PORT = int(os.getenv("PORT", "8000"))
+WEBAPP_URL = os.getenv("WEBAPP_URL", "https://mening-botim-api.onrender.com/")
 
 BASE_DIR = Path(__file__).resolve().parent
 FRONTEND_DIR = BASE_DIR / "dist"
@@ -874,6 +875,11 @@ async def start_button_callback(update: Update, context: ContextTypes.DEFAULT_TY
     await query.answer()
     await query.message.reply_text(START_BUTTON_TEXT)
     await query.message.reply_text(f"bizda hozir {get_video_count()} kino bor 🎞️")
+    webapp_keyboard = [[InlineKeyboardButton("🅿🅻🅴🆈🅻🅸🆂🆃 ni ochish", web_app=WebAppInfo(url=WEBAPP_URL))]]
+    await query.message.reply_text(
+        "🅿🅻🅴🆈🅻🅸🆂🆃 ni Telegram ichida ochish uchun tugmani bosing.",
+        reply_markup=InlineKeyboardMarkup(webapp_keyboard),
+    )
 
 
 def is_admin_user(update: Update) -> bool:
