@@ -514,6 +514,15 @@ def send_video_by_api(target_user_id: int, video: dict) -> tuple[bool, str]:
         return False, "Telegram API bilan ulanishda xatolik bo'ldi."
 
 
+def send_video_in_background(target_user_id: int, video: dict) -> None:
+    def runner() -> None:
+        ok, message = send_video_by_api(target_user_id, video)
+        status = "ok" if ok else "error"
+        print(f"[send_video:{status}] user={target_user_id} video={video.get('id')} message={message}")
+
+    Thread(target=runner, daemon=True).start()
+
+
 def build_external_file_response(handler: BaseHTTPRequestHandler, file_url: str):
     normalized_url = str(file_url or "").strip()
     if not normalized_url:
@@ -796,13 +805,12 @@ class ApiHandler(BaseHTTPRequestHandler):
             if not video:
                 self._send_json(404, {"ok": False, "message": "Video topilmadi."})
                 return
-            ok, message = send_video_by_api(int(target_user_id), video)
-            status_code = 200 if ok else 400
-            if "chat not found" in message.lower():
-                message = "Bot foydalanuvchini topa olmadi. Botga /start yuborib qayta urinib ko'ring."
-            elif "blocked" in message.lower():
-                message = "Bot bloklangan. Botni ochib /start bosing, keyin qayta yuboring."
-            self._send_json(status_code, {"ok": ok, "message": message, "error": message if not ok else ""})
+            file_id = str(video.get("file_id", "")).strip()
+            if not file_id:
+                self._send_json(400, {"ok": False, "message": "Video file_id topilmadi."})
+                return
+            send_video_in_background(int(target_user_id), video)
+            self._send_json(202, {"ok": True, "queued": True, "message": "Video yuborish boshlandi ✅"})
             return
         if path == "/api/save-video":
             owner_id = str(payload.get("owner_id", "") or payload.get("user_id", "")).strip()
@@ -904,10 +912,10 @@ async def start_button_callback(update: Update, context: ContextTypes.DEFAULT_TY
         return
     await sync_telegram_user_profile(update, context)
     await query.answer()
-    await query.message.reply_text(START_BUTTON_TEXT)
-    await query.message.reply_text(f"bizda hozir {get_video_count()} kino bor 🎞️")
     webapp_keyboard = [[InlineKeyboardButton("🅿🅻🅴🆈🅻🅸🆂🆃 ni ochish", web_app=WebAppInfo(url=WEBAPP_URL))]]
     await query.message.reply_text(
+        f"{START_BUTTON_TEXT}\n\n"
+        f"🎞️ Bizda hozir {get_video_count()} kino bor.\n\n"
         "🅿🅻🅴🆈🅻🅸🆂🆃 ni Telegram ichida ochish uchun tugmani bosing.",
         reply_markup=InlineKeyboardMarkup(webapp_keyboard),
     )

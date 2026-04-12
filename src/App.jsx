@@ -240,6 +240,13 @@ function getTelegramUserId() {
   return "";
 }
 
+function getTargetUserStorageKey(userId) {
+  const normalizedUserId = String(userId || "").trim();
+  return normalizedUserId
+    ? `${TARGET_USER_STORAGE_KEY}:${normalizedUserId}`
+    : `${TARGET_USER_STORAGE_KEY}:guest`;
+}
+
 function createViewerId() {
   if (window.crypto?.randomUUID) return window.crypto.randomUUID();
   return `viewer-${Math.random().toString(36).slice(2)}-${Date.now()}`;
@@ -424,7 +431,7 @@ async function loadCatalogItems() {
 }
 
 export default function App() {
-  const telegramUserId = getTelegramUserId();
+  const [telegramUserId, setTelegramUserId] = useState(() => getTelegramUserId());
   const [playIntroAnimations, setPlayIntroAnimations] = useState(true);
   const [theme, setTheme] = useState("default");
   const [themePanelOpen, setThemePanelOpen] = useState(false);
@@ -511,6 +518,7 @@ export default function App() {
     (selectedTargetUserId ? `ID ${selectedTargetUserId}` : "HIDOP BOT User");
   const activeOwnerId = selectedTargetUserId || telegramUserId || "";
   const themeStorageKey = getThemeStorageKey(telegramUserId || "guest");
+  const targetUserStorageKey = getTargetUserStorageKey(telegramUserId || "guest");
   const deferredQuery = useDeferredValue(activeQuery);
   const liveEmbedUrl = buildLiveEmbedUrl(liveCurrentItem?.embed_url);
   const liveSessionKey = liveCurrentItem?.id || liveCurrentItem?.embed_url || "";
@@ -561,6 +569,25 @@ export default function App() {
       tg.setHeaderColor("#101725");
       tg.setBackgroundColor("#101725");
     }
+
+    let attempts = 0;
+    const syncTelegramUser = () => {
+      const nextUserId = getTelegramUserId();
+      if (!nextUserId) return false;
+      setTelegramUserId((current) => (current === nextUserId ? current : nextUserId));
+      return true;
+    };
+
+    if (syncTelegramUser()) return undefined;
+
+    const intervalId = window.setInterval(() => {
+      attempts += 1;
+      if (syncTelegramUser() || attempts >= 12) {
+        window.clearInterval(intervalId);
+      }
+    }, 500);
+
+    return () => window.clearInterval(intervalId);
   }, []);
 
   useEffect(() => {
@@ -571,13 +598,15 @@ export default function App() {
       setSelectedTargetUserId(telegramUserId);
       setProfileInputValue(telegramUserId);
       setIsAutoDetectedUserId(true);
+      window.localStorage.removeItem(TARGET_USER_STORAGE_KEY);
     } else {
-      const savedTarget = window.localStorage.getItem(TARGET_USER_STORAGE_KEY) || "";
+      const savedTarget = window.localStorage.getItem(targetUserStorageKey) || "";
       const normalizedTarget = /^\d+$/.test(savedTarget) ? savedTarget : "";
       setSelectedTargetUserId(normalizedTarget);
       setProfileInputValue(normalizedTarget);
+      setIsAutoDetectedUserId(false);
     }
-  }, [telegramUserId, themeStorageKey]);
+  }, [telegramUserId, themeStorageKey, targetUserStorageKey]);
 
   useEffect(() => {
     document.body.dataset.theme = THEMES.includes(theme) ? theme : "default";
@@ -1255,6 +1284,7 @@ export default function App() {
       setTelegramProfilePhotoUrl("");
       setSharedProfileUsers([]);
       window.localStorage.removeItem(TARGET_USER_STORAGE_KEY);
+      window.localStorage.removeItem(targetUserStorageKey);
       setSavedItems([]);
       if (wasInPlaylist) {
         setActiveCategory("LANDING");
@@ -1271,7 +1301,7 @@ export default function App() {
 
     setSelectedTargetUserId(rawValue);
     setIsAutoDetectedUserId(false);
-    window.localStorage.setItem(TARGET_USER_STORAGE_KEY, rawValue);
+    window.localStorage.setItem(targetUserStorageKey, rawValue);
     fetch(`${API_BASE_URL}/api/users`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
