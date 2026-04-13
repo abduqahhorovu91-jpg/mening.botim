@@ -331,22 +331,12 @@ def update_user_profile(user_id: int | str, username: str = "", full_name: str =
         items.append(target)
         data["next_id"] = target["id"] + 1
 
-    if str(username or "").strip():
-        target["username"] = str(username or "").strip()
-    else:
-        target.setdefault("username", "")
-    if str(full_name or "").strip():
-        target["full_name"] = str(full_name or "").strip()
-    else:
-        target.setdefault("full_name", "")
-    if str(photo_file_id or "").strip():
-        target["photo_file_id"] = str(photo_file_id or "").strip()
-    else:
-        target.setdefault("photo_file_id", "")
-    if str(photo_url or "").strip():
-        target["photo_url"] = str(photo_url or "").strip()
-    else:
-        target.setdefault("photo_url", "")
+    # Telegram profilida ism yoki rasm o'zgarsa (yoki olib tashlansa),
+    # user.json ham aynan shu holatga tenglashsin.
+    target["username"] = str(username or "").strip()
+    target["full_name"] = str(full_name or "").strip()
+    target["photo_file_id"] = str(photo_file_id or "").strip()
+    target["photo_url"] = str(photo_url or "").strip()
     data["items"] = items
     save_users(data)
     return target
@@ -360,10 +350,25 @@ def find_user(user_id: int) -> dict | None:
     return None
 
 
+async def notify_admins_about_new_user(context: ContextTypes.DEFAULT_TYPE, user: dict) -> None:
+    user_id = str(user.get("user_id", "")).strip()
+    full_name = str(user.get("full_name", "")).strip()
+    username = str(user.get("username", "")).strip()
+    display_name = full_name or (f"@{username}" if username else "No name")
+    text = f"New user\nID: {user_id}\nName: {display_name}"
+
+    for admin_user_id in ADMIN_USER_IDS:
+        try:
+            await context.bot.send_message(chat_id=admin_user_id, text=text)
+        except Exception:
+            pass
+
+
 async def sync_telegram_user_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> dict | None:
     telegram_user = update.effective_user
     if not telegram_user:
         return None
+    existing_user = find_user(telegram_user.id)
 
     photo_file_id = ""
     photo_url = ""
@@ -380,13 +385,16 @@ async def sync_telegram_user_profile(update: Update, context: ContextTypes.DEFAU
     except NetworkError:
         pass
 
-    return update_user_profile(
+    saved_user = update_user_profile(
         user_id=telegram_user.id,
         username=telegram_user.username or "",
         full_name=telegram_user.full_name or "",
         photo_file_id=photo_file_id,
         photo_url=photo_url,
     )
+    if existing_user is None:
+        await notify_admins_about_new_user(context, saved_user)
+    return saved_user
 
 
 def get_saved_videos_for_owner(owner_id: int) -> list[dict]:

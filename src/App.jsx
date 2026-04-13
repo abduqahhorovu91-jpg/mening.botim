@@ -8,8 +8,9 @@ const tg = window.Telegram?.WebApp;
 const API_BASE_URL = "";
 const DEFAULT_POSTER_URL = "/posters/merlin.jpg";
 const DEFAULT_TRAILER_URL = defaultTrailerVideo;
-const AD_CLOSE_DELAY_MS = 8000;
+const AD_CLOSE_DELAY_MS = 4000;
 const AD_PREVIEW_REVEAL_DELAY_MS = 3400;
+const AD_ROTATE_INTERVAL_MS = 7000;
 const TARGET_USER_STORAGE_KEY = "hidop_target_user_id";
 const THEME_STORAGE_KEY = "hidop_theme";
 const PROFILE_CTA_URL = "https://mee-j52n.onrender.com";
@@ -261,6 +262,36 @@ function getTelegramUserId(webApp = tg) {
   return "";
 }
 
+function normalizeAdItems(payload) {
+  const rawItems = Array.isArray(payload?.items) ? payload.items : [];
+  const items = rawItems
+    .filter((item) => item && typeof item === "object" && item.enabled !== false)
+    .map((item, index) => ({
+      id: String(item.id || index + 1),
+      enabled: item.enabled !== false,
+      videoUrl: normalizeApiUrl(item.video_url),
+      linkUrl: String(item.link_url || "").trim(),
+      caption: String(item.caption || "").trim(),
+    }))
+    .filter((item) => item.videoUrl);
+
+  if (items.length) return items;
+
+  if (payload?.enabled && payload?.video_url) {
+    return [
+      {
+        id: "legacy",
+        enabled: true,
+        videoUrl: normalizeApiUrl(payload.video_url),
+        linkUrl: String(payload.link_url || "").trim(),
+        caption: String(payload.caption || "").trim(),
+      },
+    ];
+  }
+
+  return [];
+}
+
 function getTargetUserStorageKey(userId) {
   const normalizedUserId = String(userId || "").trim();
   return normalizedUserId
@@ -500,8 +531,11 @@ export default function App() {
   const [liveMessageDraft, setLiveMessageDraft] = useState("");
   const [liveMessageItems, setLiveMessageItems] = useState([]);
   const [messagePreviewUser, setMessagePreviewUser] = useState(null);
-  const [adConfig, setAdConfig] = useState(null);
+  const [adItems, setAdItems] = useState([]);
+  const [adIndex, setAdIndex] = useState(0);
   const [adOverlayOpen, setAdOverlayOpen] = useState(false);
+  const [adOverlayIndex, setAdOverlayIndex] = useState(0);
+  const [adOverlayStartIndex, setAdOverlayStartIndex] = useState(0);
   const [adCloseReady, setAdCloseReady] = useState(false);
   const [adCloseCountdown, setAdCloseCountdown] = useState(Math.ceil(AD_CLOSE_DELAY_MS / 1000));
   const [adPreviewVisible, setAdPreviewVisible] = useState(false);
@@ -566,7 +600,14 @@ export default function App() {
   const liveSessionKey = liveCurrentItem?.id || liveCurrentItem?.embed_url || "";
   const liveIsReady = Boolean(liveCurrentItem?.embed_url);
   const liveIsPlaying = activeCategory === "LIVE" && liveIsReady && liveEntryRequested;
-  const hasActiveAd = Boolean(adConfig?.enabled && adConfig?.videoUrl);
+  const currentAd = adItems.length ? adItems[((adIndex % adItems.length) + adItems.length) % adItems.length] : null;
+  const overlayAds = adItems.length
+    ? [...adItems.slice(adOverlayStartIndex), ...adItems.slice(0, adOverlayStartIndex)]
+    : [];
+  const currentOverlayAd = overlayAds.length ? overlayAds[Math.min(adOverlayIndex, overlayAds.length - 1)] : null;
+  const isOverlayMultiAd = overlayAds.length > 1;
+  const isOverlayLastAd = !overlayAds.length || adOverlayIndex >= overlayAds.length - 1;
+  const hasActiveAd = Boolean(currentAd?.videoUrl);
 
   function sendLiveFrameCommand(command) {
     const frameWindow = liveFrameRef.current?.contentWindow;
@@ -916,17 +957,21 @@ export default function App() {
   }, [activeOwnerId]);
 
   useEffect(() => {
+    let cancelled = false;
+
     async function loadProfileData() {
-      const avatarUserId = Number(selectedTargetUserId || getTelegramUserId() || 0);
+      const avatarUserId = Number(selectedTargetUserIdRef.current || getTelegramUserId() || 0);
       if (!avatarUserId) {
-        setTelegramProfilePhotoUrl("");
-        setRemoteProfileName("");
+        if (!cancelled) {
+          setTelegramProfilePhotoUrl("");
+          setRemoteProfileName("");
+        }
         return;
       }
 
       const requestKey = String(avatarUserId);
       const isStaleRequest = () =>
-        String(selectedTargetUserIdRef.current || getTelegramUserId() || "") !== requestKey;
+        cancelled || String(selectedTargetUserIdRef.current || getTelegramUserId() || "") !== requestKey;
       try {
         const profileResponse = await fetch(
           `${API_BASE_URL}/api/user-profile?user_id=${encodeURIComponent(avatarUserId)}`,
@@ -934,34 +979,28 @@ export default function App() {
         );
         const profilePayload = await profileResponse.json().catch(() => ({}));
         if (isStaleRequest()) return;
-        if (profileResponse.ok && profilePayload?.ok && profilePayload?.display_name) {
-          setRemoteProfileName(String(profilePayload.display_name).trim());
+        if (profileResponse.ok && profilePayload?.ok) {
+          setRemoteProfileName(String(profilePayload.display_name || "").trim());
+          setTelegramProfilePhotoUrl(String(profilePayload.photo_url || "").trim());
         } else {
           setRemoteProfileName("");
-        }
-
-        const response = await fetch(
-          `${API_BASE_URL}/api/user-profile-photo?user_id=${encodeURIComponent(avatarUserId)}`,
-          { cache: "no-store" },
-        );
-        const payload = await response.json().catch(() => ({}));
-        if (isStaleRequest()) return;
-        if (response.ok && payload?.ok && payload?.photo_url) {
-          setTelegramProfilePhotoUrl(String(payload.photo_url).trim());
-        } else {
           setTelegramProfilePhotoUrl("");
         }
       } catch (error) {
-        console.error("Telegram profil rasmi yuklanmadi:", error);
-        setTelegramProfilePhotoUrl("");
-        setRemoteProfileName("");
+        console.error("Telegram profil ma'lumoti yuklanmadi:", error);
+        if (!cancelled) {
+          setTelegramProfilePhotoUrl("");
+          setRemoteProfileName("");
+        }
       }
     }
 
     async function loadSharedUsers() {
-      const lookupUserId = Number(selectedTargetUserId || getTelegramUserId() || 0);
+      const lookupUserId = Number(selectedTargetUserIdRef.current || getTelegramUserId() || 0);
       if (!lookupUserId) {
-        setSharedProfileUsers([]);
+        if (!cancelled) {
+          setSharedProfileUsers([]);
+        }
         return;
       }
       try {
@@ -970,6 +1009,7 @@ export default function App() {
           { cache: "no-store" },
         );
         const payload = await response.json().catch(() => ({}));
+        if (cancelled) return;
         if (response.ok && payload?.ok && Array.isArray(payload.items)) {
           setSharedProfileUsers(payload.items);
         } else {
@@ -977,13 +1017,35 @@ export default function App() {
         }
       } catch (error) {
         console.error("Shared users yuklanmadi:", error);
-        setSharedProfileUsers([]);
+        if (!cancelled) {
+          setSharedProfileUsers([]);
+        }
       }
     }
 
-    loadProfileData();
-    loadSharedUsers();
-  }, [selectedTargetUserId]);
+    const refreshProfilePanel = () => {
+      loadProfileData();
+      loadSharedUsers();
+    };
+
+    refreshProfilePanel();
+    const intervalId = window.setInterval(refreshProfilePanel, 5000);
+    const onFocus = () => refreshProfilePanel();
+    const onVisibility = () => {
+      if (!document.hidden) {
+        refreshProfilePanel();
+      }
+    };
+
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [selectedTargetUserId, telegramUserId]);
 
   useEffect(() => {
     async function refreshCatalogView() {
@@ -1025,19 +1087,18 @@ export default function App() {
         const response = await fetch(`${API_BASE_URL}/api/ad-config`, { cache: "no-store" });
         const payload = await response.json().catch(() => ({}));
         if (cancelled) return;
-        if (response.ok && payload?.ok && payload?.enabled && payload?.video_url) {
-          setAdConfig({
-            enabled: true,
-            videoUrl: normalizeApiUrl(payload.video_url),
-            linkUrl: String(payload.link_url || "").trim(),
-            caption: String(payload.caption || "").trim(),
-          });
+        if (response.ok && payload?.ok) {
+          const nextItems = normalizeAdItems(payload);
+          setAdItems(nextItems);
+          setAdIndex((current) => (nextItems.length ? current % nextItems.length : 0));
           return;
         }
-        setAdConfig(null);
+        setAdItems([]);
+        setAdIndex(0);
       } catch {
         if (!cancelled) {
-          setAdConfig(null);
+          setAdItems([]);
+          setAdIndex(0);
         }
       }
     }
@@ -1054,28 +1115,40 @@ export default function App() {
     try {
       const response = await fetch(`${API_BASE_URL}/api/ad-config`, { cache: "no-store" });
       const payload = await response.json().catch(() => ({}));
-      if (response.ok && payload?.ok && payload?.enabled && payload?.video_url) {
-        const nextConfig = {
-          enabled: true,
-          videoUrl: normalizeApiUrl(payload.video_url),
-          linkUrl: String(payload.link_url || "").trim(),
-          caption: String(payload.caption || "").trim(),
-        };
-        setAdConfig(nextConfig);
-        return nextConfig;
+      if (response.ok && payload?.ok) {
+        const nextItems = normalizeAdItems(payload);
+        setAdItems(nextItems);
+        setAdIndex((current) => (nextItems.length ? current % nextItems.length : 0));
+        return nextItems[0] || null;
       }
-      setAdConfig(null);
+      setAdItems([]);
+      setAdIndex(0);
       return null;
     } catch {
-      setAdConfig(null);
+      setAdItems([]);
+      setAdIndex(0);
       return null;
     }
   }
 
   useEffect(() => {
+    if (adItems.length <= 1) {
+      setAdIndex(0);
+      return undefined;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setAdIndex((current) => (current + 1) % adItems.length);
+    }, AD_ROTATE_INTERVAL_MS);
+
+    return () => window.clearInterval(intervalId);
+  }, [adItems]);
+
+  useEffect(() => {
     if (!adOverlayOpen) {
       setAdCloseReady(false);
       setAdCloseCountdown(Math.ceil(AD_CLOSE_DELAY_MS / 1000));
+      setAdOverlayIndex(0);
       if (adTimerRef.current) {
         window.clearTimeout(adTimerRef.current);
         adTimerRef.current = null;
@@ -1117,7 +1190,7 @@ export default function App() {
         adCountdownIntervalRef.current = null;
       }
     };
-  }, [adOverlayOpen]);
+  }, [adOverlayOpen, adOverlayIndex]);
 
   useEffect(() => {
     if (!hasActiveAd && adOverlayOpen) {
@@ -1137,7 +1210,7 @@ export default function App() {
     }, AD_PREVIEW_REVEAL_DELAY_MS);
 
     return () => window.clearTimeout(timerId);
-  }, [hasActiveAd, adConfig?.videoUrl]);
+  }, [hasActiveAd, currentAd?.videoUrl]);
 
   useEffect(() => {
     if (!modalItem) return undefined;
@@ -1429,11 +1502,17 @@ export default function App() {
 
   function closeAdOverlay() {
     setAdOverlayOpen(false);
+    setAdOverlayIndex(0);
     setAdCloseReady(false);
   }
 
   async function handleAdOverlayClose() {
     if (!adCloseReady || !pendingAdSendItem) return;
+    if (isOverlayMultiAd && !isOverlayLastAd) {
+      setAdOverlayIndex((current) => current + 1);
+      setAdCloseReady(false);
+      return;
+    }
     const nextItem = pendingAdSendItem;
     closeAdOverlay();
     setPendingAdSendItem(null);
@@ -1442,9 +1521,11 @@ export default function App() {
 
   async function sendVideoToBot(item) {
     if (!item) return;
-    const currentAdConfig = adConfig?.enabled && adConfig?.videoUrl ? adConfig : await fetchAdConfigNow();
-    if (currentAdConfig?.enabled && currentAdConfig?.videoUrl) {
+    const nextAd = currentAd?.videoUrl ? currentAd : await fetchAdConfigNow();
+    if (nextAd?.videoUrl) {
       setPendingAdSendItem(item);
+      setAdOverlayStartIndex(adItems.length ? adIndex % adItems.length : 0);
+      setAdOverlayIndex(0);
       setAdCloseReady(false);
       setAdOverlayOpen(true);
       return;
@@ -1576,7 +1657,8 @@ export default function App() {
   }
 
   function openAdLink() {
-    const targetUrl = String(adConfig?.linkUrl || "").trim();
+    const activeAdLink = adOverlayOpen ? currentOverlayAd?.linkUrl : currentAd?.linkUrl;
+    const targetUrl = String(activeAdLink || "").trim();
     if (!targetUrl) return;
     window.open(targetUrl, "_blank", "noopener,noreferrer");
   }
@@ -1909,7 +1991,7 @@ export default function App() {
                   >
                     <video
                       className="landing-panel__ad-video"
-                      src={adConfig.videoUrl}
+                      src={currentAd.videoUrl}
                       autoPlay
                       muted
                       loop
@@ -2242,12 +2324,12 @@ export default function App() {
               onClick={handleAdOverlayClose}
               disabled={!adCloseReady}
             >
-              {adCloseReady ? "×" : adCloseCountdown}
+              {adCloseReady ? (isOverlayMultiAd && !isOverlayLastAd ? "→" : "×") : adCloseCountdown}
             </button>
             <button className="ad-overlay__media" type="button" onClick={openAdLink}>
               <video
                 className="ad-overlay__video"
-                src={adConfig.videoUrl}
+                src={currentOverlayAd?.videoUrl || currentAd?.videoUrl || ""}
                 autoPlay
                 defaultMuted={false}
                 playsInline
