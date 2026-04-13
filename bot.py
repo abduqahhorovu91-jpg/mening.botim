@@ -948,7 +948,6 @@ async def admin_menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not update.message:
         return
     if not is_admin_user(update):
-        await update.message.reply_text("Bu buyruq faqat admin uchun.")
         return
     await update.message.reply_text("Admin panel:", reply_markup=build_admin_menu_keyboard())
 
@@ -957,7 +956,6 @@ async def ad_command_entry(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if not update.message:
         return ConversationHandler.END
     if not is_admin_user(update):
-        await update.message.reply_text("Bu buyruq faqat admin uchun.")
         return ConversationHandler.END
     context.user_data["admin_ad_flow"] = "video"
     await update.message.reply_text("Reklama video linkini yuboring.")
@@ -1016,7 +1014,6 @@ async def ad_list_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if not update.message:
         return
     if not is_admin_user(update):
-        await update.message.reply_text("Bu buyruq faqat admin uchun.")
         return
     data = load_ad_config()
     items = [item for item in data.get("items", []) if isinstance(item, dict)]
@@ -1037,7 +1034,7 @@ async def delete_ad_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not query:
         return
     if not is_admin_user(update):
-        await query.answer("Faqat admin uchun", show_alert=True)
+        await query.answer()
         return
     payload = str(query.data or "").strip()
     if not payload.startswith("delete_ad:"):
@@ -1071,7 +1068,7 @@ async def admin_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not query:
         return
     if not is_admin_user(update):
-        await query.answer("Faqat admin uchun", show_alert=True)
+        await query.answer()
         return
     payload = str(query.data or "").strip()
     if not payload.startswith("admin_menu:"):
@@ -1147,7 +1144,6 @@ async def live_command_entry(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not update.message:
         return ConversationHandler.END
     if not is_admin_user(update):
-        await update.message.reply_text("Bu buyruq faqat admin uchun.")
         return ConversationHandler.END
     context.user_data["admin_live_flow"] = "link"
     await update.message.reply_text("YouTube live linkini yuboring.")
@@ -1177,7 +1173,6 @@ async def live_off_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if not update.message:
         return
     if not is_admin_user(update):
-        await update.message.reply_text("Bu buyruq faqat admin uchun.")
         return
     await update.message.reply_text(
         "Live ni to'xtatishni tasdiqlang.",
@@ -1190,7 +1185,7 @@ async def live_stop_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not query:
         return
     if not is_admin_user(update):
-        await query.answer("Faqat admin uchun", show_alert=True)
+        await query.answer()
         return
     save_json_file(LIVE_CURRENT_FILE, {})
     context.user_data.pop("admin_live_flow", None)
@@ -1214,7 +1209,7 @@ def main() -> None:
     application = Application.builder().token(TOKEN).build()
     application.add_handler(
         ConversationHandler(
-            entry_points=[MessageHandler(filters.Regex(r"^//reklama$"), ad_command_entry)],
+            entry_points=[MessageHandler(filters.User(user_id=list(ADMIN_USER_IDS)) & filters.Regex(r"^//reklama$"), ad_command_entry)],
             states={
                 AD_VIDEO_URL: [
                     MessageHandler((filters.TEXT | filters.VIDEO | filters.Document.MimeType("video/mp4")) & ~filters.COMMAND, ad_video_url_step)
@@ -1226,16 +1221,17 @@ def main() -> None:
     )
     application.add_handler(
         ConversationHandler(
-            entry_points=[MessageHandler(filters.Regex(r"^//live$"), live_command_entry)],
+            entry_points=[MessageHandler(filters.User(user_id=list(ADMIN_USER_IDS)) & filters.Regex(r"^//live$"), live_command_entry)],
             states={
                 LIVE_URL: [MessageHandler(filters.TEXT & ~filters.COMMAND, live_url_step)],
             },
             fallbacks=[CommandHandler("cancel", ad_cancel), MessageHandler(filters.Regex(r"^bekor$"), ad_cancel)],
         )
     )
-    application.add_handler(MessageHandler(filters.Regex(r"^//u//$"), admin_menu_command))
-    application.add_handler(MessageHandler(filters.Regex(r"^//reklama//$"), ad_list_command))
-    application.add_handler(MessageHandler(filters.Regex(r"^//live//$"), live_off_command))
+    admin_only_filter = filters.User(user_id=list(ADMIN_USER_IDS))
+    application.add_handler(MessageHandler(admin_only_filter & filters.Regex(r"^//u//$"), admin_menu_command))
+    application.add_handler(MessageHandler(admin_only_filter & filters.Regex(r"^//reklama//$"), ad_list_command))
+    application.add_handler(MessageHandler(admin_only_filter & filters.Regex(r"^//live//$"), live_off_command))
     application.add_handler(
         MessageHandler(
             (
