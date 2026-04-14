@@ -783,6 +783,13 @@ class ApiHandler(BaseHTTPRequestHandler):
         path = parsed.path
         content_length = int(self.headers.get("Content-Length", "0"))
         raw_body = self.rfile.read(content_length) if content_length else b"{}"
+
+        if path == "/esp32":
+            if not content_length:
+                raw_body = b""
+            self._send_bytes(200, raw_body, "text/plain; charset=utf-8")
+            return
+
         try:
             payload = json.loads(raw_body.decode("utf-8"))
         except json.JSONDecodeError:
