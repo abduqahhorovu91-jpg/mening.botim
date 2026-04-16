@@ -8,7 +8,8 @@ const tg = window.Telegram?.WebApp;
 const API_BASE_URL = "";
 const DEFAULT_POSTER_URL = "/posters/merlin.jpg";
 const DEFAULT_TRAILER_URL = defaultTrailerVideo;
-const AD_CLOSE_DELAY_MS = 4000;
+const SINGLE_AD_CLOSE_DELAY_MS = 9000;
+const MULTI_AD_CLOSE_DELAY_MS = 4000;
 const AD_PREVIEW_REVEAL_DELAY_MS = 3400;
 const AD_ROTATE_INTERVAL_MS = 7000;
 const TARGET_USER_STORAGE_KEY = "hidop_target_user_id";
@@ -304,6 +305,10 @@ function createViewerId() {
   return `viewer-${Math.random().toString(36).slice(2)}-${Date.now()}`;
 }
 
+function getAdCloseDelayMs(adCount) {
+  return Number(adCount || 0) <= 1 ? SINGLE_AD_CLOSE_DELAY_MS : MULTI_AD_CLOSE_DELAY_MS;
+}
+
 function getThemeStorageKey(userId) {
   const normalizedUserId = String(userId || "").trim();
   return normalizedUserId ? `${THEME_STORAGE_KEY}:${normalizedUserId}` : THEME_STORAGE_KEY;
@@ -537,7 +542,7 @@ export default function App() {
   const [adOverlayIndex, setAdOverlayIndex] = useState(0);
   const [adOverlayStartIndex, setAdOverlayStartIndex] = useState(0);
   const [adCloseReady, setAdCloseReady] = useState(false);
-  const [adCloseCountdown, setAdCloseCountdown] = useState(Math.ceil(AD_CLOSE_DELAY_MS / 1000));
+  const [adCloseCountdown, setAdCloseCountdown] = useState(Math.ceil(SINGLE_AD_CLOSE_DELAY_MS / 1000));
   const [adPreviewVisible, setAdPreviewVisible] = useState(false);
   const [pendingAdSendItem, setPendingAdSendItem] = useState(null);
   const [modalItem, setModalItem] = useState(null);
@@ -608,6 +613,7 @@ export default function App() {
   const isOverlayMultiAd = overlayAds.length > 1;
   const isOverlayLastAd = !overlayAds.length || adOverlayIndex >= overlayAds.length - 1;
   const hasActiveAd = Boolean(currentAd?.videoUrl);
+  const adCloseDelayMs = getAdCloseDelayMs(overlayAds.length || adItems.length);
 
   function sendLiveFrameCommand(command) {
     const frameWindow = liveFrameRef.current?.contentWindow;
@@ -1147,7 +1153,7 @@ export default function App() {
   useEffect(() => {
     if (!adOverlayOpen) {
       setAdCloseReady(false);
-      setAdCloseCountdown(Math.ceil(AD_CLOSE_DELAY_MS / 1000));
+      setAdCloseCountdown(Math.ceil(adCloseDelayMs / 1000));
       setAdOverlayIndex(0);
       if (adTimerRef.current) {
         window.clearTimeout(adTimerRef.current);
@@ -1160,7 +1166,7 @@ export default function App() {
       return;
     }
 
-    setAdCloseCountdown(Math.ceil(AD_CLOSE_DELAY_MS / 1000));
+    setAdCloseCountdown(Math.ceil(adCloseDelayMs / 1000));
     adCountdownIntervalRef.current = window.setInterval(() => {
       setAdCloseCountdown((current) => {
         if (current <= 1) {
@@ -1178,7 +1184,7 @@ export default function App() {
       setAdCloseReady(true);
       setAdCloseCountdown(0);
       adTimerRef.current = null;
-    }, AD_CLOSE_DELAY_MS);
+    }, adCloseDelayMs);
 
     return () => {
       if (adTimerRef.current) {
@@ -1190,7 +1196,7 @@ export default function App() {
         adCountdownIntervalRef.current = null;
       }
     };
-  }, [adOverlayOpen, adOverlayIndex]);
+  }, [adOverlayOpen, adOverlayIndex, adCloseDelayMs]);
 
   useEffect(() => {
     if (!hasActiveAd && adOverlayOpen) {
@@ -1312,7 +1318,7 @@ export default function App() {
     const lower = normalized.toLowerCase();
     let text = normalized;
     if (lower.includes("saqlandi")) {
-      text = "✅ Saqlandi. Playlistingizni /playlist orqali ko'ring.";
+      text = "saqlandi✅";
     } else if (lower.includes("yuborildi")) {
       text = "📤 Yuborildi.";
     } else if (lower.includes("yoqtirildi")) {

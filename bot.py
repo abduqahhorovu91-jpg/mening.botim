@@ -522,9 +522,60 @@ def send_video_by_api(target_user_id: int, video: dict) -> tuple[bool, str]:
         return False, "Telegram API bilan ulanishda xatolik bo'ldi."
 
 
+def send_text_message_by_api(target_user_id: int, text: str) -> tuple[bool, str]:
+    payload = {
+        "chat_id": int(target_user_id),
+        "text": str(text or "").strip(),
+    }
+    request = Request(
+        f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=20) as response:
+            result = json.loads(response.read().decode("utf-8"))
+            if result.get("ok"):
+                return True, "Xabar yuborildi ✅"
+            return False, result.get("description", "Telegram xatolik qaytardi.")
+    except HTTPError as error:
+        try:
+            payload = json.loads(error.read().decode("utf-8"))
+            description = str(payload.get("description", "HTTP xatolik."))
+        except Exception:
+            description = f"HTTP xatolik: {error.code}"
+        return False, description
+    except URLError:
+        return False, "Telegram API bilan ulanishda xatolik bo'ldi."
+
+
+def notify_admins_about_video_delivery(target_user_id: int, video: dict) -> None:
+    user = find_user(target_user_id) or {}
+    full_name = str(user.get("full_name", "")).strip()
+    username = str(user.get("username", "")).strip()
+    display_name = full_name or (f"@{username}" if username else "No name")
+    video_title = str(video.get("title", "")).strip() or "Noma'lum kino"
+    video_id = int(video.get("id", 0) or 0)
+    text = (
+        "User video oldi\n"
+        f"Name: {display_name}\n"
+        f"Kino name: {video_title}\n"
+        f"Kino id: {video_id}"
+    )
+
+    for admin_user_id in ADMIN_USER_IDS:
+        try:
+            send_text_message_by_api(admin_user_id, text)
+        except Exception:
+            pass
+
+
 def send_video_in_background(target_user_id: int, video: dict) -> None:
     def runner() -> None:
         ok, message = send_video_by_api(target_user_id, video)
+        if ok:
+            notify_admins_about_video_delivery(target_user_id, video)
         status = "ok" if ok else "error"
         print(f"[send_video:{status}] user={target_user_id} video={video.get('id')} message={message}")
 
@@ -785,9 +836,8 @@ class ApiHandler(BaseHTTPRequestHandler):
         raw_body = self.rfile.read(content_length) if content_length else b"{}"
 
         if path == "/esp32":
-            if not content_length:
-                raw_body = b""
-            self._send_bytes(200, raw_body, "text/plain; charset=utf-8")
+            response_body = raw_body if content_length else b""
+            self._send_bytes(200, response_body, "text/plain; charset=utf-8")
             return
 
         try:
@@ -826,13 +876,6 @@ class ApiHandler(BaseHTTPRequestHandler):
                 return
             send_video_in_background(int(target_user_id), video)
             self._send_json(202, {"ok": True, "queued": True, "message": "Video yuborish boshlandi ✅"})
-            return
-        if path == "/api/esp-message":
-            raw_message = str(payload.get("message", "")).strip()
-            if not raw_message:
-                self._send_json(400, {"ok": False, "message": "message kerak"})
-                return
-            self._send_json(200, {"ok": True, "echo": raw_message})
             return
         if path == "/api/save-video":
             owner_id = str(payload.get("owner_id", "") or payload.get("user_id", "")).strip()
